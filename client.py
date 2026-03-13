@@ -119,21 +119,21 @@ class MouseClient:
             logger.info(f"Sensitivity scaling: {self.client_sensitivity / self.server_sensitivity:.2f}x")
             
             # Position cursor at entry point based on client position
-            # This simulates cursor "entering" from the edge
+            # This simulates cursor "entering" from the edge with SAME Y position
             if self.position == 'right':
-                # Enter from left edge, preserve Y position
+                # Enter from left edge, preserve Y position from server
                 x = 0
                 y = int(self.entry_y * self.screen_height)
             elif self.position == 'left':
-                # Enter from right edge, preserve Y position
+                # Enter from right edge, preserve Y position from server
                 x = self.screen_width - 1
                 y = int(self.entry_y * self.screen_height)
             elif self.position == 'top':
-                # Enter from bottom edge, preserve X position
+                # Enter from bottom edge, preserve X position from server
                 x = int(self.entry_x * self.screen_width)
                 y = self.screen_height - 1
             elif self.position == 'bottom':
-                # Enter from top edge, preserve X position
+                # Enter from top edge, preserve X position from server
                 x = int(self.entry_x * self.screen_width)
                 y = 0
             else:
@@ -143,7 +143,7 @@ class MouseClient:
             pyautogui.moveTo(x, y)
             self.last_x = x
             self.last_y = y
-            logger.info(f"✓ Control ACTIVE - Cursor entered at ({x}, {y})")
+            logger.info(f"✓ Control ACTIVE - Cursor entered at ({x}, {y}) [Y={self.entry_y:.2f}]")
             
         elif not active and self.control_active:
             self.control_active = False
@@ -232,17 +232,19 @@ class MouseClient:
         """Send signal to server to return control"""
         if self.websocket and self.control_active:
             try:
+                # Normalize current position for server
+                norm_x = self.last_x / self.screen_width
+                norm_y = self.last_y / self.screen_height
+                
                 return_data = {
                     'type': 'return_control',
                     'position': self.position,
-                    'exit_x': normalize_position(self.last_x, self.last_y, 
-                                                 self.screen_width, self.screen_height)[0],
-                    'exit_y': normalize_position(self.last_x, self.last_y,
-                                                 self.screen_width, self.screen_height)[1]
+                    'exit_x': norm_x,
+                    'exit_y': norm_y
                 }
                 await self.websocket.send(json.dumps(return_data))
                 self.control_active = False
-                logger.info("✓ Returned control to server")
+                logger.info(f"✓ Returned control to server (exit at {norm_x:.2f}, {norm_y:.2f})")
             except Exception as e:
                 logger.error(f"Failed to send return control: {e}")
     

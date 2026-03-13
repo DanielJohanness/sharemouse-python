@@ -27,9 +27,6 @@ class MouseServer:
         self.control_active = False  # Track if client control is active
         self.last_x = 0
         self.last_y = 0
-        self.virtual_x = 0  # Virtual X position for extended desktop
-        self.virtual_y = 0  # Virtual Y position for extended desktop
-        self.transition_point = 0  # Where cursor crossed to client
         self.entry_x = 0  # X position when entering client
         self.entry_y = 0  # Y position when entering client
         
@@ -74,25 +71,26 @@ class MouseServer:
                         if self.control_active:
                             self.control_active = False
                             
-                            # Position server cursor at the edge where client exited
+                            # Get exit position from client (normalized 0-1)
                             exit_x = data.get('exit_x', 0.5)
                             exit_y = data.get('exit_y', 0.5)
                             
                             # Convert to server coordinates at the edge
+                            # IMPORTANT: Preserve Y position (or X for top/bottom)
                             if self.edge_trigger == 'right':
-                                # Cursor returning from right, place at right edge
+                                # Cursor returning from right, place at right edge with SAME Y
                                 server_x = self.screen_width - 1
                                 server_y = int(exit_y * self.screen_height)
                             elif self.edge_trigger == 'left':
-                                # Cursor returning from left, place at left edge
+                                # Cursor returning from left, place at left edge with SAME Y
                                 server_x = 0
                                 server_y = int(exit_y * self.screen_height)
                             elif self.edge_trigger == 'top':
-                                # Cursor returning from top, place at top edge
+                                # Cursor returning from top, place at top edge with SAME X
                                 server_x = int(exit_x * self.screen_width)
                                 server_y = 0
                             elif self.edge_trigger == 'bottom':
-                                # Cursor returning from bottom, place at bottom edge
+                                # Cursor returning from bottom, place at bottom edge with SAME X
                                 server_x = int(exit_x * self.screen_width)
                                 server_y = self.screen_height - 1
                             else:
@@ -106,7 +104,7 @@ class MouseServer:
                             self.last_x = server_x
                             self.last_y = server_y
                             
-                            logger.info(f"✓ Control returned to server - cursor at ({server_x}, {server_y})")
+                            logger.info(f"✓ Control returned to server - cursor at ({server_x}, {server_y}) [Y={exit_y:.2f}]")
                     
                     elif data.get('type') == 'clipboard':
                         # Client sent clipboard content
@@ -136,16 +134,15 @@ class MouseServer:
         elif self.edge_trigger == 'bottom':
             at_edge = y >= (self.screen_height - self.edge_threshold)
         
-        # Activate control when reaching edge
+        # Activate control when reaching edge (only once)
         if at_edge and not self.control_active:
             self.control_active = True
-            self.transition_point = x if self.edge_trigger in ['right', 'left'] else y
             
             # Store the position where we entered client
             self.entry_x = x
             self.entry_y = y
             
-            logger.info(f"Client control ACTIVATED - cursor at edge (transition at {self.transition_point})")
+            logger.info(f"✓ Client control ACTIVATED - cursor at edge ({x}, {y})")
             
             # Send activation signal with entry position
             data = {
@@ -161,10 +158,6 @@ class MouseServer:
                 self.loop
             )
         
-        # IMPORTANT: Don't check for "moving_back" based on server cursor position!
-        # When control is active, server cursor is STUCK at edge
-        # Client will send signal when cursor actually leaves client screen
-        
         return self.control_active
     
     def on_move(self, x, y):
@@ -174,19 +167,51 @@ class MouseServer:
             delta_x = x - self.last_x
             delta_y = y - self.last_y
             
-            # Update last position immediately
-            self.last_x = x
-            self.last_y = y
-            
             # Check if we should activate client control
             if not self.control_active:
                 # Not active yet, check if we hit the edge
                 self.check_edge_trigger(x, y)
-            
-            # If control is active, send delta to client
-            if self.control_active:
-                # Send ALL movement deltas to client
-                # Client will handle boundary checking and return control if needed
+                # Update last position when not active
+                self.last_x = x
+                self.last_y = y
+            else:
+                # Control is ACTIVE - cursor should stay at edge on server
+                # Keep server cursor locked at the edge position
+                if self.edge_trigger == 'right':
+                    lock_x = self.screen_width - 1
+                    lock_y = y  # Allow vertical movement
+                    pyautogui.moveTo(lock_x, lock_y)
+                    # Track both X and Y delta for client
+                    delta_x = x - self.last_x
+                    delta_y = y - self.last_y
+                    self.last_x = lock_x
+                    self.last_y = lock_y
+                elif self.edge_trigger == 'left':
+                    lock_x = 0
+                    lock_y = y
+                    pyautogui.moveTo(lock_x, lock_y)
+                    delta_x = x - self.last_x
+                    delta_y = y - self.last_y
+                    self.last_x = lock_x
+                    self.last_y = lock_y
+                elif self.edge_trigger == 'top':
+                    lock_x = x
+                    lock_y = 0
+                    pyautogui.moveTo(lock_x, lock_y)
+                    delta_x = x - self.last_x
+                    delta_y = y - self.last_y
+                    self.last_x = lock_x
+                    self.last_y = lock_y
+                elif self.edge_trigger == 'bottom':
+                    lock_x = x
+                    lock_y = self.screen_height - 1
+                    pyautogui.moveTo(lock_x, lock_y)
+                    delta_x = x - self.last_x
+                    delta_y = y - self.last_y
+                    self.last_x = lock_x
+                    self.last_y = lock_y
+                
+                # Send delta to client (client cursor moves freely)
                 if abs(delta_x) > 0 or abs(delta_y) > 0:
                     data = {
                         'type': 'move',
