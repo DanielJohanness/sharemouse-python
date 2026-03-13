@@ -1,0 +1,134 @@
+"""
+Test script to verify installation and basic functionality
+"""
+import sys
+
+def test_imports():
+    """Test if all required modules can be imported"""
+    print("Testing imports...")
+    
+    try:
+        import pyautogui
+        print("✓ pyautogui imported successfully")
+    except ImportError as e:
+        print(f"✗ Failed to import pyautogui: {e}")
+        return False
+    
+    try:
+        import pynput
+        print("✓ pynput imported successfully")
+    except ImportError as e:
+        print(f"✗ Failed to import pynput: {e}")
+        return False
+    
+    try:
+        import websockets
+        print("✓ websockets imported successfully")
+    except ImportError as e:
+        print(f"✗ Failed to import websockets: {e}")
+        return False
+    
+    return True
+
+
+def test_screen_detection():
+    """Test screen size detection"""
+    print("\nTesting screen detection...")
+    
+    try:
+        import pyautogui
+        width, height = pyautogui.size()
+        print(f"✓ Screen size detected: {width}x{height}")
+        return True
+    except Exception as e:
+        print(f"✗ Failed to detect screen size: {e}")
+        return False
+
+
+def test_mouse_control():
+    """Test basic mouse control"""
+    print("\nTesting mouse control...")
+    
+    try:
+        import pyautogui
+        current_pos = pyautogui.position()
+        print(f"✓ Current mouse position: {current_pos}")
+        print("✓ Mouse control available")
+        return True
+    except Exception as e:
+        print(f"✗ Failed mouse control test: {e}")
+        return False
+
+
+def test_utils():
+    """Test utility functions"""
+    print("\nTesting utility functions...")
+    
+    try:
+        from utils import normalize_position, denormalize_position, get_screen_size
+        
+        # Test normalization
+        width, height = get_screen_size()
+        norm_x, norm_y = normalize_position(width // 2, height // 2, width, height)
+        
+        if abs(norm_x - 0.5) < 0.01 and abs(norm_y - 0.5) < 0.01:
+            print("✓ Position normalization working")
+        else:
+            print(f"✗ Position normalization failed: got ({norm_x}, {norm_y}), expected (0.5, 0.5)")
+            return False
+        
+        # Test denormalization
+        x, y = denormalize_position(0.5, 0.5, width, height)
+        if abs(x - width // 2) < 2 and abs(y - height // 2) < 2:
+            print("✓ Position denormalization working")
+        else:
+            print(f"✗ Position denormalization failed")
+            return False
+        
+        return True
+    except Exception as e:
+        print(f"✗ Utility functions test failed: {e}")
+        return False
+
+
+def main():
+    """Run all tests"""
+    print("=" * 50)
+    print("Mouse Sync - Setup Verification")
+    print("=" * 50)
+    
+    tests = [
+        test_imports,
+        test_screen_detection,
+        test_mouse_control,
+        test_utils
+    ]
+    
+    results = []
+    for test in tests:
+        try:
+            results.append(test())
+        except Exception as e:
+            print(f"✗ Test crashed: {e}")
+            results.append(False)
+    
+    print("\n" + "=" * 50)
+    passed = sum(results)
+    total = len(results)
+    
+    if passed == total:
+        print(f"✓ All tests passed ({passed}/{total})")
+        print("\nYou're ready to use Mouse Sync!")
+        print("\nNext steps:")
+        print("1. Run server: python server.py")
+        print("2. Run client: python client.py")
+        return 0
+    else:
+        print(f"✗ Some tests failed ({passed}/{total} passed)")
+        print("\nPlease install missing dependencies:")
+        print("pip install -r requirements.txt")
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
