@@ -168,40 +168,49 @@ class MouseClient:
             new_x = self.last_x + scaled_x
             new_y = self.last_y + scaled_y
             
+            # Check if cursor is trying to leave client screen (return to server)
+            should_return = False
+            exit_edge = None
+            
+            if self.position == 'right':
+                # Client is to the right, check if cursor reaches LEFT edge
+                if new_x < 0:
+                    should_return = True
+                    exit_edge = 'left'
+                    new_x = 0  # Clamp at edge
+            elif self.position == 'left':
+                # Client is to the left, check if cursor reaches RIGHT edge
+                if new_x >= self.screen_width:
+                    should_return = True
+                    exit_edge = 'right'
+                    new_x = self.screen_width - 1
+            elif self.position == 'top':
+                # Client is above, check if cursor reaches BOTTOM edge
+                if new_y >= self.screen_height:
+                    should_return = True
+                    exit_edge = 'bottom'
+                    new_y = self.screen_height - 1
+            elif self.position == 'bottom':
+                # Client is below, check if cursor reaches TOP edge
+                if new_y < 0:
+                    should_return = True
+                    exit_edge = 'top'
+                    new_y = 0
+            
             # Clamp to screen bounds
             new_x = max(0, min(new_x, self.screen_width - 1))
             new_y = max(0, min(new_y, self.screen_height - 1))
             
-            # Check if cursor is trying to leave client screen (return to server)
-            should_return = False
-            
-            if self.position == 'right':
-                # Client is to the right, check if cursor reaches LEFT edge
-                if new_x <= self.edge_threshold and scaled_x < 0:
-                    should_return = True
-            elif self.position == 'left':
-                # Client is to the left, check if cursor reaches RIGHT edge
-                if new_x >= (self.screen_width - self.edge_threshold) and scaled_x > 0:
-                    should_return = True
-            elif self.position == 'top':
-                # Client is above, check if cursor reaches BOTTOM edge
-                if new_y >= (self.screen_height - self.edge_threshold) and scaled_y > 0:
-                    should_return = True
-            elif self.position == 'bottom':
-                # Client is below, check if cursor reaches TOP edge
-                if new_y <= self.edge_threshold and scaled_y < 0:
-                    should_return = True
-            
-            if should_return:
-                # Send return control signal to server
-                await self.return_control()
-                return
-            
             # Move cursor
-            pyautogui.moveTo(new_x, new_y)
+            pyautogui.moveTo(int(new_x), int(new_y))
             
             self.last_x = new_x
             self.last_y = new_y
+            
+            # Return control if we hit the exit edge
+            if should_return:
+                logger.info(f"Cursor hit {exit_edge} edge, returning control to server")
+                await self.return_control()
         else:
             # Fallback to absolute positioning
             norm_x = data.get('abs_x', data.get('x', 0.5))

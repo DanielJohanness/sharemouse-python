@@ -8,6 +8,7 @@ import logging
 from pynput import mouse, keyboard
 from pynput.mouse import Button
 import websockets
+import pyautogui
 from utils import normalize_position, get_screen_size, get_mouse_sensitivity, get_mouse_acceleration, get_clipboard
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -77,15 +78,35 @@ class MouseServer:
                             exit_x = data.get('exit_x', 0.5)
                             exit_y = data.get('exit_y', 0.5)
                             
-                            # Convert to server coordinates
-                            server_x = int(exit_x * self.screen_width)
-                            server_y = int(exit_y * self.screen_height)
+                            # Convert to server coordinates at the edge
+                            if self.edge_trigger == 'right':
+                                # Cursor returning from right, place at right edge
+                                server_x = self.screen_width - 1
+                                server_y = int(exit_y * self.screen_height)
+                            elif self.edge_trigger == 'left':
+                                # Cursor returning from left, place at left edge
+                                server_x = 0
+                                server_y = int(exit_y * self.screen_height)
+                            elif self.edge_trigger == 'top':
+                                # Cursor returning from top, place at top edge
+                                server_x = int(exit_x * self.screen_width)
+                                server_y = 0
+                            elif self.edge_trigger == 'bottom':
+                                # Cursor returning from bottom, place at bottom edge
+                                server_x = int(exit_x * self.screen_width)
+                                server_y = self.screen_height - 1
+                            else:
+                                server_x = int(exit_x * self.screen_width)
+                                server_y = int(exit_y * self.screen_height)
+                            
+                            # Move server cursor to the edge position
+                            pyautogui.moveTo(server_x, server_y)
                             
                             # Reset tracking position
                             self.last_x = server_x
                             self.last_y = server_y
                             
-                            logger.info(f"Client control DEACTIVATED - client returned control at ({server_x}, {server_y})")
+                            logger.info(f"✓ Control returned to server - cursor at ({server_x}, {server_y})")
                     
                     elif data.get('type') == 'clipboard':
                         # Client sent clipboard content
@@ -149,36 +170,24 @@ class MouseServer:
     def on_move(self, x, y):
         """Mouse move event handler"""
         if self.running:
-            # Calculate delta BEFORE checking edge
+            # Calculate delta from actual mouse movement
             delta_x = x - self.last_x
             delta_y = y - self.last_y
             
-            # Check edge trigger
-            is_active = self.check_edge_trigger(x, y)
+            # Update last position immediately
+            self.last_x = x
+            self.last_y = y
             
-            # Only send move events when control is active
-            if is_active:
-                # IMPORTANT: Only send delta if cursor is actually moving forward
-                # Prevent "bounce back" when cursor hits edge
-                should_send = False
-                
-                if self.edge_trigger == 'right':
-                    # Only send if moving right or vertically
-                    should_send = delta_x >= 0 or abs(delta_y) > abs(delta_x)
-                elif self.edge_trigger == 'left':
-                    # Only send if moving left or vertically
-                    should_send = delta_x <= 0 or abs(delta_y) > abs(delta_x)
-                elif self.edge_trigger == 'top':
-                    # Only send if moving up or horizontally
-                    should_send = delta_y <= 0 or abs(delta_x) > abs(delta_y)
-                elif self.edge_trigger == 'bottom':
-                    # Only send if moving down or horizontally
-                    should_send = delta_y >= 0 or abs(delta_x) > abs(delta_y)
-                else:
-                    should_send = True
-                
-                if should_send and (abs(delta_x) > 0 or abs(delta_y) > 0):
-                    # Send delta movement for smooth extended monitor behavior
+            # Check if we should activate client control
+            if not self.control_active:
+                # Not active yet, check if we hit the edge
+                self.check_edge_trigger(x, y)
+            
+            # If control is active, send delta to client
+            if self.control_active:
+                # Send ALL movement deltas to client
+                # Client will handle boundary checking and return control if needed
+                if abs(delta_x) > 0 or abs(delta_y) > 0:
                     data = {
                         'type': 'move',
                         'delta_x': delta_x,
@@ -188,9 +197,6 @@ class MouseServer:
                         self.broadcast(json.dumps(data)),
                         self.loop
                     )
-            
-            self.last_x = x
-            self.last_y = y
     
     def on_click(self, x, y, button, pressed):
         """Mouse click event handler"""
@@ -314,51 +320,7 @@ class MouseServer:
             except Exception as e:
                 logger.error(f"Clipboard monitoring error: {e}")
                 await asyncio.sleep(1)
-        """Start WebSocket server and input listeners"""
-        self.running = True
-        self.loop = asyncio.get_event_loop()
-        
-        # Start mouse listener
-        self.mouse_listener = mouse.Listener(
-            on_move=self.on_move,
-            on_click=self.on_click,
-            on_scroll=self.on_scroll
-        )
-        self.mouse_listener.start()
-        
-        # Start keyboard listener
-        self.keyboard_listener = keyboard.Listener(
-            on_press=self.on_press,
-            on_release=self.on_release
-        )
-        self.keyboard_listener.start()
-        
-        logger.info(f"Server starting on {self.host}:{self.port}")
-        logger.info(f"Screen resolution: {self.screen_width}x{self.screen_height}")
-        logger.info(f"Edge trigger: {self.edge_trigger} (threshold: {self.edge_threshold}px)")
-        logger.info("Move cursor to the RIGHT EDGE to activate client control")
-        
-        async with websockets.serve(self.handle_client, self.host, self.port):
-            await asyncio.Future()  # Run forever
     
-    def stop(self):
-        """Stop server and listeners"""
-        self.running = False
-        if hasattr(self, 'mouse_listener'):
-            self.mouse_listener.stop()
-        if hasattr(self, 'keyboard_listener'):
-            self.keyboard_listener.stop()
-        logger.info("Server stopped")
-
-
-if __name__ == '__main__':
-    server = MouseServer()
-    try:
-        asyncio.run(server.start())
-    except KeyboardInterrupt:
-        server.stop()
-        logger.info("Server shutdown")
-
     async def start(self):
         """Start WebSocket server and input listeners"""
         self.running = True
@@ -390,6 +352,15 @@ if __name__ == '__main__':
         
         async with websockets.serve(self.handle_client, self.host, self.port):
             await asyncio.Future()  # Run forever
+    
+    def stop(self):
+        """Stop server and listeners"""
+        self.running = False
+        if hasattr(self, 'mouse_listener'):
+            self.mouse_listener.stop()
+        if hasattr(self, 'keyboard_listener'):
+            self.keyboard_listener.stop()
+        logger.info("Server stopped")
 
 
 if __name__ == '__main__':
